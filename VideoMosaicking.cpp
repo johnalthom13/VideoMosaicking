@@ -159,15 +159,17 @@ cv::Mat runStitcher(const cv::Mat image1, const cv::Mat image2)
     std::cout << "Normalizing distances..." << std::endl;
     // Normalize distances to have a [0,1] range
     cv::normalize(distances, distances, 0, 1, cv::NORM_MINMAX, -1, cv::Mat());
+    std::cout << "Normalizing distances...DONE" << std::endl;
     // Store the normalized distance on corresponding pair
-    for (int i = 0; i < matches.size(); ++i)
+    for (int i = 0; i < distances.rows; ++i)
     {
-        matches[i].distance = distances.at<double>(i, 0);
+        matches[i].distance = distances.at<float>(i, 0);
     }
-
+                                                     // TODO remove duplicates
+    std::cout << "Searching for good matches..." << std::endl;
     for (int i = 0; i < descriptors_object.rows; i++)
     {
-        if (matches[i].distance < 0.01)
+        if (matches[i].distance < 0.4)     // TODO Set threshold parameter
         {
             good_matches.push_back(matches[i]);
         }
@@ -183,7 +185,8 @@ cv::Mat runStitcher(const cv::Mat image1, const cv::Mat image2)
         obj.push_back(keypoints_object[good_matches[i].queryIdx].pt);
         scene.push_back(keypoints_scene[good_matches[i].trainIdx].pt);
     }
-    // Find the Homography Matrix
+    // Find the Homography Matrix                                     
+    std::cout << "Finding homography..." << std::endl;
     cv::Mat H = cv::findHomography(obj, scene, CV_RANSAC);
     std::cout << "Find the Homography Matrix = \n" << H << std::endl;
     // Use the Homography Matrix to warp the images
@@ -199,68 +202,12 @@ cv::Mat runStitcher(const cv::Mat image1, const cv::Mat image2)
 
 int main(int argc, char **argv)
 {
-    /*double H_1to3[3][3] = {
-    {0.9397222389550625, -0.3417130056282905, -244.3182439813799},
-    {0.3420693933107188, 0.9399119699575031, -137.2934907810936},
-    {-2.105164197050072e-08, 5.938357135572661e-07, 1.0}
-    };
-    cv::Mat matH_1_to_3(3, 3, CV_64F, H_1to3);
-
-    */
-
-    /*cv::Mat img1, img2, img3;
-    cv::VideoCapture capture("../img1.jpg");
-    if(!capture.isOpened()) {
-    return -1;
-    }
-    capture >> img1;
-
-    capture = cv::VideoCapture("../img2.jpg");
-    if(!capture.isOpened()) {
-    return -1;
-    }
-    capture >> img2;
-
-    capture = cv::VideoCapture("../img3.jpg");
-    if(!capture.isOpened()) {
-    return -1;
-    }
-    capture >> img3;
-
-    if(img1.empty() || img2.empty() || img3.empty()) {
-    return -1;
-    }
-
-    cv::Mat temp;
-    cv::resize(img1, img1, cv::Size(), 0.5, 0.5);
-    cv::resize(img2, img2, cv::Size(), 0.5, 0.5);
-    cv::resize(img3, img3, cv::Size(), 0.5, 0.5);
-    /** cv::Mat matH_1_to_3 = runStitcher(img1, img3, temp);
-
-
-    cv::Mat mask;
-    cv::Mat panorama = stitch(img3, img1, mask, matH_1_to_3);
-
-
-    TODO FIX 2_pan H matrix
-    cv::imshow("panorama", panorama);
-    cv::waitKey(0);
-    double H_2toPan[3][3] = {
-    {0.9368203321472403, -0.3454438491707963, 662.6735928838605},
-    {0.3407072775400232, 0.9356103255435544, -6.647965498116199},
-    {-1.969823553341344e-06, -6.793479233220533e-06, 1.0}
-    };
-    //cv::Mat matH_2toPan(3, 3, CV_64F, H_2toPan);
-    cv::Mat pan13 = cv::imread("../pan13.jpg");
-    cv::imshow("pan13", pan13);
-    cv::waitKey(0);
-    cv::Mat temp2;
-    cv::Mat matH_2toPan = runStitcher(img2, pan13, temp2);
-    panorama = stitch(panorama, img2, mask, matH_2toPan);
-    **/
-
+    
+    std::cout << "Program started." << std::endl;
     std::string filename = "../winter.mp4";
+    //std::string filename = "../foglab3.mov";
     cv::VideoCapture capture(filename);
+    std::cout << "File read..." << std::endl;
     std::vector<cv::Mat> images;
     if (!capture.isOpened())
         throw "Error when reading steam_avi";
@@ -273,45 +220,54 @@ int main(int argc, char **argv)
     {
         cv::Mat frame;
         capture >> frame;
-        if (images.empty())
+        cv::Mat grayFrame;
+        cv::cvtColor(frame, grayFrame, CV_RGB2GRAY);
+        int xx = cv::countNonZero(grayFrame);
+        std::cout << ctr << " - Non-zero: " << xx << std::endl;
+        if (xx < 1)
         {
-
+            continue;
         }
         // Compare
         images.push_back(frame);
         // end compare
         // TODO add scheme to compare similarity. if too similar, reject
         //images.push_back(frame);
-        if (frame.empty() || ctr > 30)
+        if (frame.empty() || ctr > 102)
             break;
+
         ++ctr;
     }
 
+    std::cout << "Done reading the frames..." << std::endl;
 
-    /*cv::imshow("imgs1", imgs1);
+    int i = 100;
+    cv::Mat imgs1 = images[30], imgs2 = images[i];
+    cv::imshow("imgs1", imgs1);
     cv::imshow("imgs2", imgs2);
-    cv::Mat matH_1_to_3 = runStitcher(imgs1, imgs2, temp);
-
-
+    //cv::Mat matH_1_to_3 = runStitcher(imgs1, imgs2, temp);
+    cv::waitKey(0);
+    /*
     cv::Mat mask;
     cv::Mat panorama = stitch(imgs2, imgs1, mask, matH_1_to_3);
     cv::imshow("panorama", panorama);
-    cv::waitKey(0);*/
-    int i = 30;
-    cv::Mat imgs1 = images[0], imgs2 = images[i];
+    cv::waitKey(0);*/;
     do
     {
         std::cout << "STITCHING " << i << std::endl;
         cv::Mat matH_1_to_2 = runStitcher(imgs1, imgs2);
 
+        std::cout << "H Matrix found " << i << std::endl;
         cv::Mat mask;
         cv::Mat panorama = stitch(imgs2, imgs1, mask, matH_1_to_2);
         imgs1 = panorama;
 
+        std::cout << "Displaying... " << i << std::endl;
         cv::imshow("panorama", panorama);
         cv::waitKey(0);
         i += 10;
         imgs2 = images[i];
+        break;
         /// add adaptive change for i
     } while (i < frameCount);
 
