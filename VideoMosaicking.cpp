@@ -1,4 +1,5 @@
 
+#include <chrono>
 #include <memory>
 #include <fstream>
 #include <opencv2/opencv.hpp>
@@ -139,6 +140,7 @@ int main(int argc, char **argv)
     bool firstPass = true;
     int frameNumber = 0;
     cv::Mat prev, curr;
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     while (true)
     {
         if (firstPass)
@@ -164,13 +166,13 @@ int main(int argc, char **argv)
         // ------------------ End of preprocessing
 
         // ------------------ Compare
-        if (frameNumber%(frameRate) != 0) continue;   // Sample per second
+        if (frameNumber%(frameRate) != 0) continue;   // Sample per second  TODO: Change
         // ------------------ End compare  
         LOG_DEBUG("curr = frame " << frameNumber);
         cv::imshow("prev", prev); 
         cv::imshow("curr", curr);
         LOG_START("Stitching the images");
-        cv::waitKey(50);
+        cv::waitKey(50);   // TODO remove this once results are ok
         cv::Mat homography;
         stitcher->computeHomography(prev, curr, homography);
         cv::Mat mask;
@@ -181,35 +183,13 @@ int main(int argc, char **argv)
         prev = panorama;   // Update prev as the panorama
         curr.release();
         panorama.release();
-        cv::waitKey(50);
+        cv::waitKey(50);   // TODO remove this once results are ok
     }
-
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+    int duration = std::chrono::duration_cast<std::chrono::seconds>(end - begin).count();
+    LOG_DEBUG("Duration: " << duration);
+    LOG_DEBUG("Rate: " << (duration/frameCount));
     LOG_FINISH("Reading the frames...");
-    /*
-    int i = 100;
-    cv::Mat imgs1 = images[6], imgs2 = images[i];
-    cv::imshow("imgs1", imgs1);
-    cv::imshow("imgs2", imgs2);
-    cv::waitKey(0);
-    do
-    {
-        std::cout << "STITCHING " << i << std::endl;
-        cv::Mat matH_1_to_2 = runStitcher(imgs1, imgs2);
-
-        std::cout << "H Matrix found " << i << std::endl;
-        cv::Mat mask;
-        cv::Mat panorama = stitch(imgs2, imgs1, mask, matH_1_to_2);
-        imgs1 = panorama;
-
-        std::cout << "Displaying... " << i << std::endl;
-        cv::imshow("panorama", panorama);
-        cv::waitKey(0);
-        i += 10;
-        imgs2 = images[i];
-        break;
-        /// add adaptive change for i
-    } while (i < frameCount);
-    */
     LOG_FINISH("Video mosaic tool");
     system("pause");
     return 0;
