@@ -1,16 +1,16 @@
-#include <iostream>
 
-#include <iostream>
 #include <memory>
 #include <fstream>
 #include <opencv2/opencv.hpp>
 #include <opencv2/calib3d.hpp>
-#include <opencv2/features2d.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/videoio/videoio.hpp>
 #include <opencv2/highgui/highgui.hpp>
-#include <opencv2/stitching.hpp>
-                                    
+#include <opencv2/stitching.hpp>   
+
+#include "Logger.hpp"
+#include "HistogramComparator.hpp"
+#include "Stitcher.hpp"
 
 cv::Mat stitch(const cv::Mat &img1, const cv::Mat &img2, cv::Mat &mask, const cv::Mat &H)
 {
@@ -105,136 +105,89 @@ cv::Mat stitch(const cv::Mat &img1, const cv::Mat &img2, cv::Mat &mask, const cv
     return panorama;
 }
 
-cv::Mat runStitcher(const cv::Mat image1, const cv::Mat image2)
+bool hasWhitePixels(const cv::Mat& img)
 {
-    cv::Mat gray_image1, gray_image2;
-
-    cv::cvtColor(image1, gray_image1, CV_RGB2GRAY);
-    cv::cvtColor(image2, gray_image2, CV_RGB2GRAY);
-
-    cv::Ptr<cv::FeatureDetector> detector = cv::ORB::create();
-
-    std::vector<cv::KeyPoint> keypoints_object, keypoints_scene;
-
-    detector->detect(gray_image1, keypoints_object);
-    detector->detect(gray_image2, keypoints_scene);
-
-    //-- Step 2: Calculate descriptors (feature vectors)
-    cv::Ptr<cv::DescriptorExtractor> extractor = cv::ORB::create();
-
-    cv::Mat descriptors_object, descriptors_scene;
-
-    extractor->compute(gray_image1, keypoints_object, descriptors_object);
-    extractor->compute(gray_image2, keypoints_scene, descriptors_scene);
-
-    //-- Step 3: Matching descriptor vectors using FLANN matcher
-    cv::Ptr<cv::DescriptorMatcher> matcher = new cv::BFMatcher();
-    std::vector<cv::DMatch> matches;
-    matcher->match(descriptors_object, descriptors_scene, matches);
-
-    double max_dist = 0;
-    double min_dist = 100;
-    std::cout << "Descriptors object = " << descriptors_object.rows << std::endl;
-    std::cout << "Descriptors scene = " << descriptors_scene.rows << std::endl;
-    //-- Quick calculation of max and min distances between keypoints
-    for (int i = 0; i < descriptors_object.rows; i++)
-    {
-        double dist = matches[i].distance;
-        if (dist < min_dist) min_dist = dist;
-        if (dist > max_dist) max_dist = dist;
-    }
-
-    printf("-- Max dist : %f \n", max_dist);
-    printf("-- Min dist : %f \n", min_dist);
-
-    //-- Use only "good" matches (i.e. whose distance is less than 3*min_dist )
-    std::vector<cv::DMatch > good_matches;
-    // Normalize distances
-    cv::Mat distances;
-    for (const auto& m : matches)
-    {
-        distances.push_back(m.distance);
-    }
-
-    std::cout << "Normalizing distances..." << std::endl;
-    // Normalize distances to have a [0,1] range
-    cv::normalize(distances, distances, 0, 1, cv::NORM_MINMAX, -1, cv::Mat());
-    std::cout << "Normalizing distances...DONE" << std::endl;
-    // Store the normalized distance on corresponding pair
-    for (int i = 0; i < distances.rows; ++i)
-    {
-        matches[i].distance = distances.at<float>(i, 0);
-    }
-                                                     // TODO remove duplicates
-    std::cout << "Searching for good matches..." << std::endl;
-    for (int i = 0; i < descriptors_object.rows; i++)
-    {
-        if (matches[i].distance < 0.4)     // TODO Set threshold parameter
-        {
-            good_matches.push_back(matches[i]);
-        }
-    }
-
-    std::cout << "Good matches = " << good_matches.size() << std::endl;
-    std::vector<cv::Point2f> obj;
-    std::vector<cv::Point2f> scene;
-
-    for (int i = 0; i < good_matches.size(); i++)
-    {
-        //-- Get the keypoints from the good matches
-        obj.push_back(keypoints_object[good_matches[i].queryIdx].pt);
-        scene.push_back(keypoints_scene[good_matches[i].trainIdx].pt);
-    }
-    // Find the Homography Matrix                                     
-    std::cout << "Finding homography..." << std::endl;
-    cv::Mat H = cv::findHomography(obj, scene, CV_RANSAC);
-    std::cout << "Find the Homography Matrix = \n" << H << std::endl;
-    return H;
+    cv::Mat grayFrame;
+    cv::cvtColor(img, grayFrame, CV_RGB2GRAY);
+    double min, max;
+    cv::minMaxLoc(grayFrame, &min, &max);
+    return max == 255;  // Skip images with no white pixel  and no black pixel
 }
 
 int main(int argc, char **argv)
 {
-    
-    std::cout << "Program started." << std::endl;
+    LOG_START("Video mosaic tool");
     std::string filename = "../winter.mp4";
     //std::string filename = "../foglab3.mov";
     cv::VideoCapture capture(filename);
-    std::cout << "File read..." << std::endl;
-    std::vector<cv::Mat> images;
+    LOG_DEBUG("Reading file: " + filename);
     if (!capture.isOpened())
         throw "Error when reading steam_avi";
     int frameCount = capture.get(CV_CAP_PROP_FRAME_COUNT);
-    std::cout << "Frame rate: " << capture.get(CV_CAP_PROP_FPS) << std::endl;
-    std::cout << "Frame count: " << frameCount << std::endl;
-    std::cout << "Reading the frames..." << std::endl;
-    int ctr = 0;
+    int frameRate = capture.get(CV_CAP_PROP_FPS);
+    LOG_DEBUG("Frame rate: " << frameRate);
+    LOG_DEBUG("Frame count: " << frameCount);
+    LOG_START("Reading the frames...");
+    
+    std::unique_ptr<IFrameComparator> frameComparator(new HistogramComparator);
+    // Settings
+    cv::Ptr<cv::FeatureDetector> detector = cv::xfeatures2d::SIFT::create();
+    cv::Ptr<cv::DescriptorExtractor> extractor = cv::ORB::create();
+    cv::Ptr<cv::DescriptorMatcher> matcher = new cv::BFMatcher();
+    // End settings
+    std::unique_ptr<Stitcher> stitcher(new Stitcher(detector, extractor, matcher));
+    bool firstPass = true;
+    int frameNumber = 0;
+    cv::Mat prev, curr;
     while (true)
     {
-        cv::Mat frame;
-        capture >> frame;
-        cv::Mat grayFrame;
-        cv::cvtColor(frame, grayFrame, CV_RGB2GRAY);
-        int xx = cv::countNonZero(grayFrame);
-        std::cout << ctr << " - Non-zero: " << xx << std::endl;
-        if (xx < 1)
+        if (firstPass)
+        {
+            capture >> prev;
+            frameNumber++;
+            if (prev.empty()) break; // No valid image to stitch (i.e. all white/black)
+            if (hasWhitePixels(prev))
+            {
+                LOG_DEBUG("prev = frame " << frameNumber);
+                firstPass = false;
+            }
+        }
+        capture >> curr;
+        frameNumber++;
+        if (curr.empty()) break; // No more frames
+
+        // ------------------ Preprocessing
+        if (!hasWhitePixels(curr))
         {
             continue;
         }
-        // Compare
-        images.push_back(frame);
-        // end compare
-        // TODO add scheme to compare similarity. if too similar, reject
-        //images.push_back(frame);
-        if (frame.empty() || ctr > 102)
-            break;
+        // ------------------ End of preprocessing
 
-        ++ctr;
+        // ------------------ Compare
+        if (frameNumber%(frameRate) != 0) continue;   // Sample per second
+        // ------------------ End compare  
+        LOG_DEBUG("curr = frame " << frameNumber);
+        cv::imshow("prev", prev); 
+        cv::imshow("curr", curr);
+        LOG_START("Stitching the images");
+        cv::waitKey(50);
+        cv::Mat homography;
+        stitcher->computeHomography(prev, curr, homography);
+        cv::Mat mask;
+        cv::Mat panorama = stitch(curr, prev, mask, homography);
+        cv::imshow("panorama", panorama);
+        LOG_FINISH("Stitching the images");  
+        prev.release();
+        prev = panorama;   // Update prev as the panorama
+        curr.release();
+        panorama.release();
+        cv::waitKey(50);
     }
 
-    std::cout << "Done reading the frames..." << std::endl;
-
+    LOG_FINISH("Reading the frames...");
+    /*
     int i = 100;
-    cv::Mat imgs1 = images[30], imgs2 = images[i];
+    cv::Mat imgs1 = images[6], imgs2 = images[i];
     cv::imshow("imgs1", imgs1);
     cv::imshow("imgs2", imgs2);
     cv::waitKey(0);
@@ -256,5 +209,8 @@ int main(int argc, char **argv)
         break;
         /// add adaptive change for i
     } while (i < frameCount);
+    */
+    LOG_FINISH("Video mosaic tool");
+    system("pause");
     return 0;
 }

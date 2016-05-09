@@ -34,5 +34,6 @@ bool HistogramComparator::isSimilar(const cv::Mat& base, const cv::Mat& img)
     cv::calcHist(&hsv_test1, 1, channels, cv::Mat(), hist_test1, 2, histSize, ranges, true, false);
     cv::normalize(hist_test1, hist_test1, 0, 1, cv::NORM_MINMAX, -1, cv::Mat());
     double ratio = cv::compareHist(hist_base, hist_test1, method_);
-    return ratio > 0.4;
+    std::cout << ratio << std::endl;
+    return ratio == 0;
 }

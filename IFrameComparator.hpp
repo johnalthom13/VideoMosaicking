@@ -8,6 +8,7 @@ namespace cv
 
 class IFrameComparator
 {
+public:
     virtual bool isSimilar(const cv::Mat&, const cv::Mat&) = 0;
     virtual ~IFrameComparator() {}
 };

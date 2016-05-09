@@ -33,3 +33,5 @@
 /x64/Release/VideoMosaicking.tlog/cl.command.1.tlog
 /x64/Release/VideoMosaicking.tlog/unsuccessfulbuild
 /x64/Release/VideoMosaicking.tlog/VideoMosaicking.lastbuildstate
+/x64/Debug/HistogramComparator.obj
+/x64/Debug/Stitcher.obj
