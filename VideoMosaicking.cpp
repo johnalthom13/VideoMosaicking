@@ -189,14 +189,6 @@ cv::Mat runStitcher(const cv::Mat image1, const cv::Mat image2)
     std::cout << "Finding homography..." << std::endl;
     cv::Mat H = cv::findHomography(obj, scene, CV_RANSAC);
     std::cout << "Find the Homography Matrix = \n" << H << std::endl;
-    // Use the Homography Matrix to warp the images
-    //cv::Mat result;
-    //cv::warpPerspective(image1, result, H, cv::Size(image1.cols+image2.cols,image1.rows));
-    //cv::Mat half(result,cv::Rect(0,0,image2.cols,image2.rows));
-    //image2.copyTo(half);
-    //output = result;
-    //cv::imshow("Result", result);
-    //cv::waitKey(0);
     return H;
 }
 
@@ -245,13 +237,7 @@ int main(int argc, char **argv)
     cv::Mat imgs1 = images[30], imgs2 = images[i];
     cv::imshow("imgs1", imgs1);
     cv::imshow("imgs2", imgs2);
-    //cv::Mat matH_1_to_3 = runStitcher(imgs1, imgs2, temp);
     cv::waitKey(0);
-    /*
-    cv::Mat mask;
-    cv::Mat panorama = stitch(imgs2, imgs1, mask, matH_1_to_3);
-    cv::imshow("panorama", panorama);
-    cv::waitKey(0);*/;
     do
     {
         std::cout << "STITCHING " << i << std::endl;
@@ -270,15 +256,5 @@ int main(int argc, char **argv)
         break;
         /// add adaptive change for i
     } while (i < frameCount);
-
-    /*
-    std::vector<cv::Mat> images{img1, img2, img3};
-    cv::Mat pano;
-    cv::Stitcher stitcher = cv::Stitcher::createDefault(true);
-    cv::Stitcher::Status stat = stitcher.stitch(images, pano);
-    cv::imshow( "Result", pano );
-    //cv::imshow("panorama", panorama);
-
-    */
     return 0;
 }
