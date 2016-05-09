@@ -132,63 +132,69 @@ int main(int argc, char **argv)
     
     std::unique_ptr<IFrameComparator> frameComparator(new HistogramComparator);
     // Settings
-    cv::Ptr<cv::FeatureDetector> detector = cv::xfeatures2d::SIFT::create();
+    cv::Ptr<cv::FeatureDetector> detector = cv::ORB::create();
     cv::Ptr<cv::DescriptorExtractor> extractor = cv::ORB::create();
     cv::Ptr<cv::DescriptorMatcher> matcher = new cv::BFMatcher();
     // End settings
     std::unique_ptr<Stitcher> stitcher(new Stitcher(detector, extractor, matcher));
     bool firstPass = true;
-    int frameNumber = 0;
+    int frameNumber = 0; // Counts actual number of frames
+    int relativeFrameNum = 0; // Count based on t
+    int frameJumps = frameRate;
     cv::Mat prev, curr;
+    const int WIDTH = capture.get(CV_CAP_PROP_FRAME_WIDTH);
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     while (true)
     {
         if (firstPass)
         {
-            capture >> prev;
             frameNumber++;
+            capture >> prev;
             if (prev.empty()) break; // No valid image to stitch (i.e. all white/black)
             if (hasWhitePixels(prev))
             {
                 LOG_DEBUG("prev = frame " << frameNumber);
+                relativeFrameNum = capture.get(CV_CAP_PROP_POS_FRAMES);
                 firstPass = false;
             }
         }
-        capture >> curr;
+
         frameNumber++;
+        capture >> curr;
         if (curr.empty()) break; // No more frames
-
-        // ------------------ Preprocessing
-        if (!hasWhitePixels(curr))
+        if (capture.get(CV_CAP_PROP_POS_FRAMES) - relativeFrameNum < frameJumps)
         {
-            continue;
+            continue; /// Skip
         }
-        // ------------------ End of preprocessing
+        relativeFrameNum = capture.get(CV_CAP_PROP_POS_FRAMES);
 
-        // ------------------ Compare
-        if (frameNumber%(frameRate) != 0) continue;   // Sample per second  TODO: Change
-        // ------------------ End compare  
+        // ------------------ Sampling
+        
+        // ------------------ End Sampling  
         LOG_DEBUG("curr = frame " << frameNumber);
         cv::imshow("prev", prev); 
         cv::imshow("curr", curr);
         LOG_START("Stitching the images");
-        cv::waitKey(50);   // TODO remove this once results are ok
+        cv::waitKey(0);   // TODO remove this once results are ok
         cv::Mat homography;
         stitcher->computeHomography(prev, curr, homography);
+        double delta_x = homography.at<double>(0, 2);
+        frameJumps = (0.75*frameRate + 0.25*std::abs(delta_x)) / (double)(2);
+        std::cout << frameJumps << std::endl;
         cv::Mat mask;
         cv::Mat panorama = stitch(curr, prev, mask, homography);
         cv::imshow("panorama", panorama);
-        LOG_FINISH("Stitching the images");  
+        LOG_FINISH("Stitching the images"); 
         prev.release();
         prev = panorama;   // Update prev as the panorama
         curr.release();
-        panorama.release();
+        //panorama.release();
         cv::waitKey(50);   // TODO remove this once results are ok
     }
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
     int duration = std::chrono::duration_cast<std::chrono::seconds>(end - begin).count();
     LOG_DEBUG("Duration: " << duration);
-    LOG_DEBUG("Rate: " << (duration/frameCount));
+    LOG_DEBUG("Rate: " << (frameCount / duration));
     LOG_FINISH("Reading the frames...");
     LOG_FINISH("Video mosaic tool");
     system("pause");
