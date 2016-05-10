@@ -1,4 +1,4 @@
-
+#include <stack>
 #include <chrono>
 #include <memory>
 #include <fstream>
@@ -115,11 +115,49 @@ bool hasWhitePixels(const cv::Mat& img)
     return max == 255;  // Skip images with no white pixel  and no black pixel
 }
 
+void runPairStitcher(std::shared_ptr<Stitcher> stitcher, std::vector<cv::Mat> subPanorama)
+{
+    std::size_t SIZE = subPanorama.size();
+    if (SIZE <= 1)
+    {
+        if (SIZE == 1)
+        {
+            cv::imwrite("panor_final.jpg", subPanorama[0]);
+        }
+        return;
+    }
+
+    std::vector<cv::Mat> duplicate;
+    if (SIZE % 2 == 1) // Odd
+    {
+        duplicate.push_back(subPanorama[subPanorama.size()-1]);
+        subPanorama.pop_back();
+    }
+    // Sure that the count is even
+    while (subPanorama.size() > 1)
+    {
+        cv::Mat img1 = subPanorama[subPanorama.size() - 1];
+        subPanorama.pop_back();
+        cv::Mat img2 = subPanorama[subPanorama.size() - 1];
+        subPanorama.pop_back();
+
+        cv::Mat homography;
+        stitcher->computeHomography(img1, img2, homography);
+
+        cv::Mat mask;
+        cv::Mat panorama = stitch(img2, img1, mask, homography);
+        //cv::imshow("SSS.jpg", panorama);
+        //cv::waitKey(0); 
+        duplicate.push_back(panorama);
+    }
+    runPairStitcher(stitcher, duplicate);
+}
+
 int main(int argc, char **argv)
 {
     LOG_START("Video mosaic tool");
-    std::string filename = "../winter.mp4";
-    //std::string filename = "../foglab3.mov";
+    //std::string filename = "../winter.mp4";
+    std::string filename = "../foglab3.mov";
     cv::VideoCapture capture(filename);
     LOG_DEBUG("Reading file: " + filename);
     if (!capture.isOpened())
@@ -132,18 +170,24 @@ int main(int argc, char **argv)
     
     std::unique_ptr<IFrameComparator> frameComparator(new HistogramComparator);
     // Settings
-    cv::Ptr<cv::FeatureDetector> detector = cv::ORB::create();
-    cv::Ptr<cv::DescriptorExtractor> extractor = cv::ORB::create();
+    cv::Ptr<cv::FeatureDetector> detector = cv::xfeatures2d::SurfFeatureDetector::create();
+    cv::Ptr<cv::DescriptorExtractor> extractor = cv::xfeatures2d::SurfDescriptorExtractor::create();
     cv::Ptr<cv::DescriptorMatcher> matcher = new cv::BFMatcher();
     // End settings
-    std::unique_ptr<Stitcher> stitcher(new Stitcher(detector, extractor, matcher));
+    std::shared_ptr<Stitcher> stitcher(new Stitcher(detector, extractor, matcher));
     bool firstPass = true;
     int frameNumber = 0; // Counts actual number of frames
     int relativeFrameNum = 0; // Count based on t
     int frameJumps = frameRate;
     cv::Mat prev, curr;
     const int WIDTH = capture.get(CV_CAP_PROP_FRAME_WIDTH);
+    const int HEIGHT = capture.get(CV_CAP_PROP_FRAME_HEIGHT);
+    const double W_H_ratio = (double)(WIDTH) / (double)(HEIGHT);
+    const double TRANSLATION_THRESH = 150;
+
+    LOG_DEBUG("Dimension: " << WIDTH << " x " << HEIGHT);
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    std::vector<cv::Mat> imgStack;
     while (true)
     {
         if (firstPass)
@@ -172,25 +216,37 @@ int main(int argc, char **argv)
         
         // ------------------ End Sampling  
         LOG_DEBUG("curr = frame " << frameNumber);
-        cv::imshow("prev", prev); 
-        cv::imshow("curr", curr);
+        //cv::imshow("prev", prev); 
+        //cv::imshow("curr", curr);
         LOG_START("Stitching the images");
-        cv::waitKey(0);   // TODO remove this once results are ok
+        //cv::waitKey(50);   // TODO remove this once results are ok
         cv::Mat homography;
         stitcher->computeHomography(prev, curr, homography);
-        double delta_x = homography.at<double>(0, 2);
-        frameJumps = (0.75*frameRate + 0.25*std::abs(delta_x)) / (double)(2);
+        double delta_y = homography.at<double>(1, 2);     // Tells the direction of motion
+        double delta_x = homography.at<double>(0, 2);     // Tells the direction of motion
+        // - means the video is translating from left to RIGHT
+        // + means the video is translating from right to LEFT
+        frameJumps = (0.75*frameRate + 0.25*std::abs(delta_x)) / (double)(2);;
         std::cout << frameJumps << std::endl;
         cv::Mat mask;
         cv::Mat panorama = stitch(curr, prev, mask, homography);
-        cv::imshow("panorama", panorama);
+        cv::imwrite("panorama.jpg", panorama);
         LOG_FINISH("Stitching the images"); 
         prev.release();
-        prev = panorama;   // Update prev as the panorama
+        if (panorama.size().width > 2 * WIDTH || panorama.size().height > 2 * HEIGHT ||
+            std::abs(delta_x) > TRANSLATION_THRESH || std::abs(delta_y) > TRANSLATION_THRESH / W_H_ratio)
+        {
+            imgStack.push_back(panorama);
+            prev = curr;
+        }
+        //else
+        {
+            prev = panorama;   // Update prev as the panorama
+        }
         curr.release();
-        //panorama.release();
-        cv::waitKey(50);   // TODO remove this once results are ok
+        panorama.release();
     }
+    runPairStitcher(stitcher, imgStack);
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
     int duration = std::chrono::duration_cast<std::chrono::seconds>(end - begin).count();
     LOG_DEBUG("Duration: " << duration);

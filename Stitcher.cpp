@@ -54,7 +54,28 @@ void Stitcher::computeHomography(const cv::Mat& image1, const cv::Mat& image2, c
     {
         matches[i].distance = distances.at<float>(i, 0);
     }
-    // TODO remove duplicates
+    // Remove duplicates
+    auto comparator = [](const cv::DMatch& a, const cv::DMatch& b)
+    {
+        return (a.distance < b.distance);
+    };
+    std::sort(matches.begin(), matches.end(), comparator);
+
+    const int MATR_SIZE = matches.size();
+    for (int i = 0; i < MATR_SIZE - 1; ++i)
+    {
+        for (int j = i + 1; j < MATR_SIZE; ++j)
+        {
+            // If the left keypoint or right keypoint occurred again
+            if (matches[i].queryIdx == matches[j].queryIdx ||
+                matches[i].trainIdx == matches[j].trainIdx)
+            {
+                // Set to 1 since this is the highest possible value
+                matches[j].distance = 1.0;
+            }
+        }
+    }
+    // end remove duplicates
     std::cout << "Searching for good matches..." << std::endl;
     for (int i = 0; i < descriptors_object.rows; i++)
     {
