@@ -73,7 +73,7 @@ cv::Mat stitch(const cv::Mat &img1, const cv::Mat &img2, cv::Mat &mask, const cv
         img1.copyTo(half);
 
         //Create the new mask matrix for the panorama
-        mask = cv::Mat::ones(img2.size(), CV_8U) * 255;                                                                                             
+        mask = cv::Mat::ones(img2.size(), CV_8U) * 255;
         cv::warpPerspective(mask, mask, H2*H, size_warp);
         cv::rectangle(mask, img1_rect, cv::Scalar(255), -1);
     }
@@ -115,43 +115,31 @@ bool hasWhitePixels(const cv::Mat& img)
     return max == 255;  // Skip images with no white pixel  and no black pixel
 }
 
-void runPairStitcher(std::shared_ptr<Stitcher> stitcher, std::vector<cv::Mat> subPanorama)
+void crop(cv::Mat& image)
 {
-    std::size_t SIZE = subPanorama.size();
-    if (SIZE <= 1)
+    cv::Mat gray;
+    cv::cvtColor(image, gray, CV_RGB2GRAY);
+    int minCol = gray.cols;
+    int minRow = gray.rows;
+    int maxCol = 0;
+    int maxRow = 0;
+    for (int i = 0; i < gray.rows - 3; ++i)
     {
-        if (SIZE == 1)
+        for (int j = 0; j < gray.cols; ++j)
         {
-            cv::imwrite("panor_final.jpg", subPanorama[0]);
+            if (gray.at<char>(i, j) != 0)
+            {
+                if (i < minRow) minRow = i;
+                if (j < minCol) minCol = j;
+                if (i > maxRow) maxRow = i;
+                if (j > maxCol) maxCol = j;
+            }
         }
-        return;
     }
-
-    std::vector<cv::Mat> duplicate;
-    if (SIZE % 2 == 1) // Odd
-    {
-        duplicate.push_back(subPanorama[subPanorama.size()-1]);
-        subPanorama.pop_back();
-    }
-    // Sure that the count is even
-    while (subPanorama.size() > 1)
-    {
-        cv::Mat img1 = subPanorama[subPanorama.size() - 1];
-        subPanorama.pop_back();
-        cv::Mat img2 = subPanorama[subPanorama.size() - 1];
-        subPanorama.pop_back();
-
-        cv::Mat homography;
-        stitcher->computeHomography(img1, img2, homography);
-
-        cv::Mat mask;
-        cv::Mat panorama = stitch(img2, img1, mask, homography);
-        //cv::imshow("SSS.jpg", panorama);
-        //cv::waitKey(0); 
-        duplicate.push_back(panorama);
-    }
-    runPairStitcher(stitcher, duplicate);
+    cv::Rect cropRect(minCol, minRow, maxCol - minCol, maxRow - minRow);
+    image = image(cropRect).clone();
 }
+
 
 int main(int argc, char **argv)
 {
@@ -167,7 +155,7 @@ int main(int argc, char **argv)
     LOG_DEBUG("Frame rate: " << frameRate);
     LOG_DEBUG("Frame count: " << frameCount);
     LOG_START("Reading the frames...");
-    
+
     std::unique_ptr<IFrameComparator> frameComparator(new HistogramComparator);
     // Settings
     cv::Ptr<cv::FeatureDetector> detector = cv::xfeatures2d::SurfFeatureDetector::create();
@@ -184,10 +172,10 @@ int main(int argc, char **argv)
     const int HEIGHT = capture.get(CV_CAP_PROP_FRAME_HEIGHT);
     const double W_H_ratio = (double)(WIDTH) / (double)(HEIGHT);
     const double TRANSLATION_THRESH = 150;
-
+    bool isMovingRight = true;
+    bool isMovingUp = false;
     LOG_DEBUG("Dimension: " << WIDTH << " x " << HEIGHT);
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-    std::vector<cv::Mat> imgStack;
     while (true)
     {
         if (firstPass)
@@ -197,7 +185,9 @@ int main(int argc, char **argv)
             if (prev.empty()) break; // No valid image to stitch (i.e. all white/black)
             if (hasWhitePixels(prev))
             {
-                LOG_DEBUG("prev = frame " << frameNumber);
+                cv::resize(prev, prev, cv::Size(prev.size().width / 2, prev.size().height / 2));
+                crop(prev);
+                LOG_DEBUG("first frame = " << frameNumber);
                 relativeFrameNum = capture.get(CV_CAP_PROP_POS_FRAMES);
                 firstPass = false;
             }
@@ -210,43 +200,33 @@ int main(int argc, char **argv)
         {
             continue; /// Skip
         }
+
+        crop(curr);
+        cv::resize(curr, curr, cv::Size(curr.size().width / 2, curr.size().height / 2));
         relativeFrameNum = capture.get(CV_CAP_PROP_POS_FRAMES);
 
-        // ------------------ Sampling
-        
-        // ------------------ End Sampling  
         LOG_DEBUG("curr = frame " << frameNumber);
-        //cv::imshow("prev", prev); 
-        //cv::imshow("curr", curr);
         LOG_START("Stitching the images");
-        //cv::waitKey(50);   // TODO remove this once results are ok
         cv::Mat homography;
         stitcher->computeHomography(prev, curr, homography);
         double delta_y = homography.at<double>(1, 2);     // Tells the direction of motion
         double delta_x = homography.at<double>(0, 2);     // Tells the direction of motion
         // - means the video is translating from left to RIGHT
         // + means the video is translating from right to LEFT
-        frameJumps = (0.75*frameRate + 0.25*std::abs(delta_x)) / (double)(2);;
+        isMovingRight = (delta_x < 0);
+        isMovingUp = (delta_y >= 0);
+        frameJumps = (0.75*frameRate + 0.25*std::abs(delta_x)) / (double)(2);
         std::cout << frameJumps << std::endl;
         cv::Mat mask;
         cv::Mat panorama = stitch(curr, prev, mask, homography);
-        cv::imwrite("panorama.jpg", panorama);
-        LOG_FINISH("Stitching the images"); 
+        // Crop panorama image
+        cv::imshow("panorama.jpg", panorama);
+        cv::waitKey(0);
+        LOG_FINISH("Stitching the images");
         prev.release();
-        if (panorama.size().width > 2 * WIDTH || panorama.size().height > 2 * HEIGHT ||
-            std::abs(delta_x) > TRANSLATION_THRESH || std::abs(delta_y) > TRANSLATION_THRESH / W_H_ratio)
-        {
-            imgStack.push_back(panorama);
-            prev = curr;
-        }
-        //else
-        {
-            prev = panorama;   // Update prev as the panorama
-        }
+        prev = panorama;
         curr.release();
-        panorama.release();
     }
-    runPairStitcher(stitcher, imgStack);
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
     int duration = std::chrono::duration_cast<std::chrono::seconds>(end - begin).count();
     LOG_DEBUG("Duration: " << duration);
