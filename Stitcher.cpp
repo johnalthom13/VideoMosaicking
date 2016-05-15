@@ -1,6 +1,5 @@
 #include "Stitcher.hpp"
 
-
 Stitcher::Stitcher(cv::Ptr<cv::FeatureDetector> detector,
     cv::Ptr<cv::DescriptorExtractor> extractor,
     cv::Ptr<cv::DescriptorMatcher> matcher)
@@ -99,4 +98,97 @@ void Stitcher::computeHomography(const cv::Mat& image1, const cv::Mat& image2, c
     std::cout << "Finding homography..." << std::endl;
     homography = cv::findHomography(obj, scene, CV_RANSAC);
     std::cout << "Find the Homography Matrix = \n" << homography << std::endl;
+}
+
+cv::Mat Stitcher::stitch(const cv::Mat &img1, const cv::Mat &img2, cv::Mat &mask, const cv::Mat &H) const
+{
+    //Coordinates of the 4 corners of the image
+    std::vector<cv::Point2f> corners(4);
+    corners[0] = cv::Point2f(0, 0);
+    corners[1] = cv::Point2f(0, img2.rows);
+    corners[2] = cv::Point2f(img2.cols, 0);
+    corners[3] = cv::Point2f(img2.cols, img2.rows);
+
+    std::vector<cv::Point2f> cornersTransform(4);
+    cv::perspectiveTransform(corners, cornersTransform, H);
+
+    double offsetX = 0.0;
+    double offsetY = 0.0;
+
+    //Get max offset outside of the image
+    for (size_t i = 0; i < 4; i++)
+    {
+        std::cout << "cornersTransform[" << i << "]=" << cornersTransform[i] << std::endl;
+        if (cornersTransform[i].x < offsetX)
+        {
+            offsetX = cornersTransform[i].x;
+        }
+
+        if (cornersTransform[i].y < offsetY)
+        {
+            offsetY = cornersTransform[i].y;
+        }
+    }
+
+    offsetX = -offsetX;
+    offsetY = -offsetY;
+    std::cout << "offsetX=" << offsetX << " ; offsetY=" << offsetY << std::endl;
+
+    //Get max width and height for the new size of the panorama
+    double maxX = std::max((double)img1.cols + offsetX, (double)std::max(cornersTransform[2].x, cornersTransform[3].x) + offsetX);
+    double maxY = std::max((double)img1.rows + offsetY, (double)std::max(cornersTransform[1].y, cornersTransform[3].y) + offsetY);
+    std::cout << "maxX=" << maxX << " ; maxY=" << maxY << std::endl;
+
+    cv::Size size_warp(maxX, maxY);
+    cv::Mat panorama(size_warp, CV_8UC3);
+
+    //Create the transformation matrix to be able to have all the pixels
+    cv::Mat H2 = cv::Mat::eye(3, 3, CV_64F);
+    H2.at<double>(0, 2) = offsetX;
+    H2.at<double>(1, 2) = offsetY;
+
+    cv::warpPerspective(img2, panorama, H2*H, size_warp);
+
+    //ROI for img1
+    cv::Rect img1_rect(offsetX, offsetY, img1.cols, img1.rows);
+    cv::Mat half;
+    //First iteration
+    if (mask.empty())
+    {
+        //Copy img1 in the panorama using the ROI
+        cv::Mat half = cv::Mat(panorama, img1_rect);
+        img1.copyTo(half);
+
+        //Create the new mask matrix for the panorama
+        mask = cv::Mat::ones(img2.size(), CV_8U) * 255;
+        cv::warpPerspective(mask, mask, H2*H, size_warp);
+        cv::rectangle(mask, img1_rect, cv::Scalar(255), -1);
+    }
+    else
+    {
+        //Create an image with the final size to paste img1
+        cv::Mat maskTmp = cv::Mat::zeros(size_warp, img1.type());
+        half = cv::Mat(maskTmp, img1_rect);
+        img1.copyTo(half);
+
+        //Copy img1 into panorama using a mask
+        cv::Mat maskTmp2 = cv::Mat::zeros(size_warp, CV_8U);
+        half = cv::Mat(maskTmp2, img1_rect);
+        mask.copyTo(half);
+        maskTmp.copyTo(panorama, maskTmp2);
+
+        //Create a mask for the warped part
+        maskTmp = cv::Mat::ones(img2.size(), CV_8U) * 255;
+        cv::warpPerspective(maskTmp, maskTmp, H2*H, size_warp);
+
+        maskTmp2 = cv::Mat::zeros(size_warp, CV_8U);
+        half = cv::Mat(maskTmp2, img1_rect);
+        //Copy the old mask in maskTmp2
+        mask.copyTo(half);
+        //Merge the old mask with the new one
+        maskTmp += maskTmp2;
+        maskTmp.copyTo(mask);
+    }
+
+    return panorama;
 }

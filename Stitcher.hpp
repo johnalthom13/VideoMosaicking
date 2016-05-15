@@ -9,8 +9,9 @@ class Stitcher
 {
 public:
     Stitcher(cv::Ptr<cv::FeatureDetector>, cv::Ptr<cv::DescriptorExtractor>, cv::Ptr<cv::DescriptorMatcher>);
-    void computeHomography(const cv::Mat&, const cv::Mat&, cv::Mat&) const;
     ~Stitcher() = default;
+    void computeHomography(const cv::Mat&, const cv::Mat&, cv::Mat&) const;
+	cv::Mat stitch(const cv::Mat&, const cv::Mat&, cv::Mat&, const cv::Mat&) const;
 private:
     cv::Ptr<cv::FeatureDetector> detector_;
     cv::Ptr<cv::DescriptorExtractor> extractor_;
