@@ -10,6 +10,7 @@
 
 #include "Logger.hpp"
 #include "Stitcher.hpp"
+#include "AlgorithmFactory.hpp"
 
 bool hasWhitePixels(const cv::Mat& img)
 {
@@ -50,11 +51,11 @@ void crop(cv::Mat& image)
 int main(int argc, char **argv)
 {
     LOG_START("Video mosaic tool");
-	if (argc <= 1)
-	{
-		LOG_DEBUG("Error! Insufficient parameters provided.");
-		return -1;
-	}
+    if (argc <= 1)
+    {
+        LOG_DEBUG("Error! Insufficient parameters provided.");
+        return -1;
+    }
     std::string filename(argv[1]);
     cv::VideoCapture capture(filename);
     LOG_DEBUG("Reading file: " + filename);
@@ -66,9 +67,11 @@ int main(int argc, char **argv)
     LOG_DEBUG("Frame count: " << frameCount);
     LOG_START("Reading the frames...");
     // Settings
-    cv::Ptr<cv::FeatureDetector> detector = cv::xfeatures2d::SiftFeatureDetector::create();
-    cv::Ptr<cv::DescriptorExtractor> extractor = cv::xfeatures2d::SiftDescriptorExtractor::create();
-    cv::Ptr<cv::DescriptorMatcher> matcher = new cv::BFMatcher();
+    std::shared_ptr<AlgorithmFactory> factory(new AlgorithmFactory);
+    FeatureDetectorPtr detector = factory->createDetector("SURF");
+    DescriptorExtractorPtr extractor = factory->createExtractor("SIFT");
+    DescriptorMatcherPtr matcher = factory->createMatcher("FLANN");
+
     // End settings
     std::shared_ptr<Stitcher> stitcher(new Stitcher(detector, extractor, matcher));
     bool firstPass = true;
@@ -124,7 +127,7 @@ int main(int argc, char **argv)
         cv::Mat mask;
         cv::Mat panorama = stitcher->stitch(curr, prev, mask, homography);
         // Crop panorama image
-		crop(panorama);
+        crop(panorama);
         cv::imshow("panorama.jpg", panorama);
         cv::waitKey(0);
         LOG_FINISH("Stitching the images");

@@ -1,8 +1,8 @@
 #include "Stitcher.hpp"
 
 Stitcher::Stitcher(cv::Ptr<cv::FeatureDetector> detector,
-    cv::Ptr<cv::DescriptorExtractor> extractor,
-    cv::Ptr<cv::DescriptorMatcher> matcher)
+                   cv::Ptr<cv::DescriptorExtractor> extractor,
+                   cv::Ptr<cv::DescriptorMatcher> matcher)
     : detector_(detector)
     , extractor_(extractor)
     , matcher_(matcher)
@@ -15,13 +15,13 @@ void Stitcher::computeHomography(const cv::Mat& image1, const cv::Mat& image2, c
 
     cv::cvtColor(image1, gray_image1, CV_RGB2GRAY);
     cv::cvtColor(image2, gray_image2, CV_RGB2GRAY);
-                                                                            
+
     std::vector<cv::KeyPoint> keypoints_object, keypoints_scene;
 
     detector_->detect(gray_image1, keypoints_object);
     detector_->detect(gray_image2, keypoints_scene);
 
-    //-- Step 2: Calculate descriptors (feature vectors)             
+    //-- Step 2: Calculate descriptors (feature vectors)
     cv::Mat descriptors_object, descriptors_scene;
 
     extractor_->compute(gray_image1, keypoints_object, descriptors_object);
@@ -31,10 +31,10 @@ void Stitcher::computeHomography(const cv::Mat& image1, const cv::Mat& image2, c
     std::vector<cv::DMatch> matches;
     matcher_->match(descriptors_object, descriptors_scene, matches);
 
-    
+
     std::cout << "Descriptors object = " << descriptors_object.rows << std::endl;
     std::cout << "Descriptors scene = " << descriptors_scene.rows << std::endl;
-    
+
     //-- Use only "good" matches (i.e. whose distance is less than 3*min_dist )
     std::vector<cv::DMatch > good_matches;
     // Normalize distances
@@ -67,7 +67,7 @@ void Stitcher::computeHomography(const cv::Mat& image1, const cv::Mat& image2, c
         {
             // If the left keypoint or right keypoint occurred again
             if (matches[i].queryIdx == matches[j].queryIdx ||
-                matches[i].trainIdx == matches[j].trainIdx)
+                    matches[i].trainIdx == matches[j].trainIdx)
             {
                 // Set to 1 since this is the highest possible value
                 matches[j].distance = 1.0;
@@ -94,7 +94,7 @@ void Stitcher::computeHomography(const cv::Mat& image1, const cv::Mat& image2, c
         obj.push_back(keypoints_object[good_matches[i].queryIdx].pt);
         scene.push_back(keypoints_scene[good_matches[i].trainIdx].pt);
     }
-    // Find the Homography Matrix                                     
+    // Find the Homography Matrix
     std::cout << "Finding homography..." << std::endl;
     homography = cv::findHomography(obj, scene, CV_RANSAC);
     std::cout << "Find the Homography Matrix = \n" << homography << std::endl;
